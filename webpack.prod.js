@@ -18,7 +18,7 @@ module.exports = {
     },
     output:{
         path: path.resolve(__dirname, './wgscovplot/tmpl/js'),
-        filename: "[name].prod.bundle.js",
+        filename: "[name].bundle.js",
         library: "wgscovplot",
         libraryTarget: "umd",
         globalObject: "this"
@@ -26,7 +26,7 @@ module.exports = {
     module: {
         rules:[{
                 test:/\.js$/,
-                exclude:[/(node_modules)/,/(wgscovplot)/],
+                exclude:[/(node_modules)/,/(wgscovplot)/,/(tests)/],
                 use: "babel-loader"
             },
             {

@@ -1,5 +1,6 @@
 import {map} from "lodash/collection";
 import {join} from "lodash/array";
+import {maxBy} from "lodash";
 
 /**
  * Define properties for gene/amplicon feature plot which is in the last index of grid
@@ -35,9 +36,24 @@ export const FLU_SEGMENT_COLOURS = {
 };
 
 /**
+ * Convert based 64 string to Float32 Array
+ * @param {number[]} depths
+ * @param {number} threshold
+ * @returns {number[]}
+ */
+function toFloat32Array(b64String) {
+    if (typeof b64String === 'string') {
+        let f32a = new Float32Array(new Uint8Array([...window.atob(b64String)].map(c => c.charCodeAt(0))).buffer);
+        let depthArr = Array.from(f32a);
+        return depthArr;
+    }
+    return b64String;
+}
+
+/**
  * Write tooltip information to HTML table
  * @param {string[]} headers - Header of table
- * @param {Array<Array<string>>} rows - Rows of table
+ * @param {(string[])[]} rows - Rows of table
  * @param {string} classes - Classes defined for table
  * @returns {string}
  */
@@ -75,10 +91,10 @@ function toTableHtml(
 }
 
 /**
- *
- * @param {Array<number>} depths
+ * Get Coords Interval based on depth threshold
+ * @param {number[]} depths
  * @param {number} threshold
- * @returns {{start: number, end: number}[]} The regions in which depth < threshold
+ * @returns {number[]}
  */
 function getCoordsInterval(depths, threshold) {
     let coords = [];
@@ -108,4 +124,4 @@ function getCoordsInterval(depths, threshold) {
     return coords;
 }
 
-export {toTableHtml, getCoordsInterval};
+export {toTableHtml, getCoordsInterval, toFloat32Array};

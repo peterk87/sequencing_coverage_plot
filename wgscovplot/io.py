@@ -2,6 +2,7 @@ import logging
 from io import TextIOWrapper
 from pathlib import Path
 from typing import List, Dict, Union, Tuple, OrderedDict, Optional
+from collections import defaultdict
 
 from BCBio import GFF
 from Bio import SeqIO, Entrez
@@ -10,7 +11,6 @@ from Bio.SeqRecord import SeqRecord
 from jinja2 import Environment, FileSystemLoader
 from pydantic import BaseModel
 
-from wgscovplot.db import TemplateDB
 from wgscovplot.features import Feature
 from wgscovplot.tools import mosdepth
 
@@ -25,47 +25,10 @@ class TemplateHTML(BaseModel):
     cov_stats_html: str
 
 
-def write_html_coverage_plot_segment_virus(
-        samples_name: List[str],
-        segments_name: List[str],
-        depths_data: Dict[str, Dict[str, List]],
-        variants_data: Dict[str, Dict[str, Dict]],
-        ref_seq: Dict[str, Dict[str, str]],
-        ref_id: Dict[str, Dict[str, str]],
-        summary_info: str,
-        low_coverage_regions: Dict[str, Dict[str, str]],
-        low_coverage_threshold: int,
-        primer_data: Dict[str, Dict[str, Dict]],
-        about_html: str,
-        output_html: Path,
-) -> None:
-    render_env = Environment(
-        keep_trailing_newline=True,
-        trim_blocks=True,
-        lstrip_blocks=True,
-        loader=FileSystemLoader(Path.joinpath(Path(__file__).resolve().parent, "tmpl")),
-    )
-    template_file = render_env.get_template("wgscovplot_flu_template.html")
-    with open(output_html, "w+", encoding="utf-8") as fout:
-        fout.write(template_file.render(samples_name=samples_name,
-                                        segments_name=segments_name,
-                                        depths_data=depths_data,
-                                        variants_data=variants_data,
-                                        ref_seq=ref_seq,
-                                        ref_id=ref_id,
-                                        summary_info=summary_info,
-                                        low_coverage_regions=low_coverage_regions,
-                                        low_coverage_threshold=low_coverage_threshold,
-                                        primer_data=primer_data,
-                                        about_html=about_html,
-                                        segment_virus=True))
-
-
 def write_html_coverage_plot(
-        db: TemplateDB,
+        db,
         html: TemplateHTML,
         output_html: Path,
-        dev: bool = False,
 ) -> None:
     render_env = Environment(
         keep_trailing_newline=True,
@@ -80,7 +43,6 @@ def write_html_coverage_plot(
                 db=db.dict(),
                 **html.dict(),
                 is_segmented=False,
-                dev=dev,
             )
         )
 
@@ -94,8 +56,14 @@ def pydantic_to_dict(x):
         return x.dict()
 
 
-def parse_gff(path: Path) -> List[Feature]:
-    out = []
+def defaultdict_to_dict(x):
+    if isinstance(x, defaultdict):
+        x = {k: defaultdict_to_dict(v) for k, v in x.items()}
+    return x
+
+
+def parse_gff(path: Path) -> Dict[int, List[Feature]]:
+    features = {}
     with open(path) as fh:
         interest_info = dict(gff_type=["gene", "five_prime_UTR", "three_prime_UTR"])
         rec: SeqRecord
@@ -107,25 +75,37 @@ def parse_gff(path: Path) -> List[Feature]:
                 strand = int(feature.location.strand)
                 qs: OrderedDict[str, List[str]] = feature.qualifiers
                 feature_name = qs['Name'][0] if 'Name' in qs else qs['gbkey'][0]
-                out.append(Feature(
-                    start_pos=start_pos,
-                    end_pos=end_pos,
-                    strand=strand,
-                    name=feature_name
-                ))
-    out.sort(key=lambda k: k.start_pos)
-    return out
+                if features.get(strand):
+                    features[strand].append(Feature(
+                        start=start_pos,
+                        end=end_pos,
+                        strand=strand,
+                        name=feature_name
+                    ))
+                else:
+                    features[strand] = []
+                    features[strand].append(Feature(
+                        start=start_pos,
+                        end=end_pos,
+                        strand=strand,
+                        name=feature_name
+                    ))
+    if 1 in features.keys():
+        features[1].sort(key=lambda k: k.start)
+    if -1 in features.keys():
+        features[-1].sort(key=lambda k: k.start)
+    return features
 
 
 def parse_genbank(
         gb_handle_or_path: Union[Path, TextIOWrapper]
-) -> Tuple[str, List[Feature]]:
+) -> Tuple[str, Dict[int, List[Feature]]]:
     """Parse sequence and features from Genbank
 
     Args:
         gb_handle_or_path: Handle or path to Genbank file
     """
-    features: List[Feature] = []
+    features = {}
     skip_feature = {"CDS", "source", "repeat_region", "misc_feature"}
     seq = ''
     for seq_record in SeqIO.parse(gb_handle_or_path, "gb"):
@@ -149,13 +129,26 @@ def parse_genbank(
             start_pos = int(seq_feature.location.start) + 1
             end_pos = int(seq_feature.location.end)
             strand = int(seq_feature.strand)
-            features.append(Feature(
-                start=start_pos,
-                end=end_pos,
-                strand=strand,
-                name=feature_name
-            ))
-    features.sort(key=lambda f: f.start)
+            if features.get(strand):
+                features[strand].append(Feature(
+                    start=start_pos,
+                    end=end_pos,
+                    strand=strand,
+                    name=feature_name
+                ))
+            else:
+                features[strand] = []
+                features[strand].append(Feature(
+                    start=start_pos,
+                    end=end_pos,
+                    strand=strand,
+                    name=feature_name
+                ))
+    # sort plus, minus strand coord separately
+    if 1 in features.keys():
+        features[1].sort(key=lambda k: k.start)
+    if -1 in features.keys():
+        features[-1].sort(key=lambda k: k.start)
     return seq, features
 
 
@@ -174,6 +167,8 @@ def get_ref_seq_and_annotation(
     if ref_seq is None or (gene_features is None and get_gene_features):
         ref_id = mosdepth.get_refseq_id(input_dir)
         ref_seq, gene_features = fetch_ref_seq_from_ncbi_entrez(ref_id)
+        if not get_gene_features:
+            gene_features = None
     return ref_seq, gene_features
 
 

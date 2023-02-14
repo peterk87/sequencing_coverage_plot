@@ -3,13 +3,14 @@ import {get, isNil} from "lodash";
 import {uniqBy} from "lodash/array";
 import {keys} from "lodash/object";
 import {genomeCoverage, meanCoverage, medianCoverage} from "../stats";
+import {toTableHtml} from "../util";
 
 /**
  * Function get Variant Comparison across samples
  * @param {WgsCovPlotDB} db
  * @param {number} position - x-axis position
  * @param {string} sampleInFocus - sample
- * @returns <Array<Array<string>> - Variant comparison across samples
+ * @returns {(string[])[]} - Variant comparison across samples
  */
 function getVariantComparison(
     {
@@ -26,7 +27,7 @@ function getVariantComparison(
     let variantArr = [];
     for (let sample of selectedSamples) {
         let sampleVariants = variants[sample];
-        let variant = find(sampleVariants, {POS: position + ""})
+        let variant = find(sampleVariants, {POS: position + ""}, 0)
         if (!isNil(variant)) {
             variantArr.push(variant);
         } else {
@@ -61,7 +62,7 @@ function getVariantComparison(
  * @param {number} end - end position
  * @param {number} low_coverage_threshold - low coverage threshold
  * @param {number} position - Selected position
- * @returns <Array<Array<string>> - Coverage Stat comparison across samples
+ * @returns {(string[])[]} - Coverage Stat comparison across samples
  */
 function getCoverageStatComparison(
     {
@@ -104,7 +105,136 @@ function getCoverageStatComparison(
     return rows;
 }
 
+/**
+ * Format tooltips in table
+ * @param {WgsCovPlotDB} db
+ * @returns {(string[])[]} - Coverage Stat comparison across samples
+ */
+function tooltipFormatter({db}) {
+    return function (params) {
+        const {
+            selectedSamples,
+            depths,
+            chart,
+            crossSampleComparisonInTooltips,
+            variants,
+            ref_seq,
+            low_coverage_threshold,
+            showCovStatsInTooltips,
+        } = db;
+        let output = "";
+        let [{
+            axisIndex,
+            axisValue: position
+        }] = params;
+        if (axisIndex >= selectedSamples.length) {
+            return output;
+        }
+        let sample = selectedSamples[axisIndex];
+        let sampleDepths = depths[sample];
+        let depth = sampleDepths[position - 1];
+        let [dataZoom] = chart.getOption().dataZoom;
+        let zoomStart = Math.floor(dataZoom.startValue);
+        let zoomEnd = Math.floor(dataZoom.endValue);
+        let positionRows = [];
+        let coverageStatRows = [];
+        const isVariantBar = params.find(element => {
+            return element.componentSubType === "bar";
+        });
+        if (isVariantBar) {
+            if (crossSampleComparisonInTooltips) {
+                positionRows = getVariantComparison({
+                    db,
+                    position,
+                    sampleInFocus: sample,
+                });
+            } else {
+                positionRows = [
+                    ["Position", position.toLocaleString()],
+                    ["Coverage Depth", depth.toLocaleString()],
+                ];
+                let foundObj = find(variants[sample], {"POS": position.toString()}, 0);
+                if (!isNil(foundObj)) {
+                    for (const [key, value] of Object.entries(foundObj)) {
+                        if (key !== "POS" && key !== "sample") {
+                            positionRows.push([key, value]);
+                        }
+                    }
+                }
+            }
+        } else {
+            positionRows = [
+                ["Pos", position.toLocaleString()],
+                ["Coverage Depth", depth.toLocaleString()],
+            ];
+            positionRows.push(["Sequence", ref_seq[position - 1]]);
+        }
+        if (positionRows.length) {
+            output += `<h5>Sample: ${sample}</h5>`;
+            output += toTableHtml({
+                headers: ["Position Info", ""],
+                rows: positionRows,
+            });
+            if (showCovStatsInTooltips) {
+                if (crossSampleComparisonInTooltips) {
+                    coverageStatRows = getCoverageStatComparison({
+                        db,
+                        start: zoomStart,
+                        end: zoomEnd,
+                        position
+                    });
+                } else {
+                    let meanCov = meanCoverage(sampleDepths, zoomStart, zoomEnd).toFixed(2);
+                    let medianCov = medianCoverage(sampleDepths, zoomStart, zoomEnd).toFixed(2);
+                    let genomeCov = genomeCoverage(sampleDepths, zoomStart, zoomEnd, low_coverage_threshold).toFixed(2);
+                    coverageStatRows = [
+                        [
+                            "Range",
+                            `${zoomStart.toLocaleString()} - ${zoomEnd.toLocaleString()}`,
+                        ],
+                        ["Mean Coverage", `${meanCov}X`],
+                        ["Median Coverage", `${medianCov}X`],
+                        [`Genome Coverage (>= ${low_coverage_threshold}X)`, `${genomeCov}%`],
+                    ];
+                }
+                output += toTableHtml(
+                    {
+                        headers: ["Coverage View Stats", ""],
+                        rows: coverageStatRows,
+                    });
+            }
+        }
+        return output;
+    };
+}
+
+/**
+ * Define options for tooltips
+ * @param {Object} db - wgscovplot DB object
+ * @returns {Object[]}
+ */
+function getTooltips(db) {
+    const {
+        tooltipTriggerOn = "mousemove",
+    } = db;
+    return [
+        {
+            trigger: "axis",
+            enterable: true,
+            triggerOn: tooltipTriggerOn,
+            appendToBody: true,
+            renderMode: "html",
+            showContent: true,
+            confine: true,
+            position: "cursor",
+            axisPointer: {
+                type: "line"
+            },
+            formatter: tooltipFormatter({db}),
+        },
+    ];
+}
+
 export {
-    getVariantComparison,
-    getCoverageStatComparison
+    getTooltips
 };

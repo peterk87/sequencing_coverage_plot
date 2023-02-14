@@ -1,4 +1,4 @@
-import {get, isNil} from "lodash";
+import {get, isEmpty} from "lodash";
 import {getCoordsInterval, NT_COLOURS} from "../util";
 import {graphic} from "echarts/core";
 
@@ -14,25 +14,25 @@ function getMarkArea({sample, db}) {
         depths,
         low_coverage_threshold = 10,
         lowCovAreaOpacity = 0.4,
-        segments = null,
-        segCoords = null,
     } = db;
     let data = [];
-    if (!isNil(segments) && !isNil(segCoords) && segments.length > 0) {
-        for (let i = 0; i < segments.length; i++) {
-            let segment = segments[i];
+    if (db.segment_virus === true) {
+        for (let segment of db.selectedSegments) {
             let sampleSegDepths = depths[sample][segment];
-            if (isNil(sampleSegDepths)) {
-                continue;
+            let coordsInterval;
+            if (isEmpty(sampleSegDepths)) {
+                coordsInterval = [{start:1, end:(db.segCoords[segment].end - db.segCoords[segment].start + 1)}];
+            } else {
+                coordsInterval = getCoordsInterval(sampleSegDepths, low_coverage_threshold);
             }
-            for (let {start, end} of getCoordsInterval(sampleSegDepths, low_coverage_threshold)) {
+            for (let {start, end} of coordsInterval) {
                 data.push([
                     {
                         name: `${start}-${end} (<${low_coverage_threshold}X)`,
-                        xAxis: start + segCoords[segment].start - 1,
+                        xAxis: start + db.segCoords[segment].start - 1,
                     },
                     {
-                        xAxis: end + segCoords[segment].start - 1,
+                        xAxis: end + db.segCoords[segment].start - 1,
                     }
                 ]);
             }
@@ -80,9 +80,9 @@ function getCoverageThresholdLine(db) {
             formatter: "{c}X",
         },
         lineStyle: {
-            color: "#450606",
+            color: "#6b6464",
             width: 1,
-            type: "dotted",
+            type: "dashed",
             opacity: db.showLowCovRegionsOpacity
         },
         data: [
@@ -97,7 +97,7 @@ function getCoverageThresholdLine(db) {
 /**
  * Define options for depth coverage charts
  * @param {WgsCovPlotDB} db - wgscovplot DB object
- * @returns {Array<Object>}
+ * @returns {Object[]}
  */
 function getDepthSeries(db) {
     const {
@@ -139,7 +139,7 @@ function getDepthSeries(db) {
 /**
  * Define options for variant bar charts
  * @param {WgsCovPlotDB} db
- * @returns {Array<Object>}
+ * @returns {Object[]}
  */
 function getVariantsSeries(db) {
     const {
@@ -147,8 +147,8 @@ function getVariantsSeries(db) {
         variants,
         depths,
         ref_seq,
+        showVariantLabels,
         showVariantSiteTooltips = true,
-        showVariantLabels = false,
         hideOverlappingVariantLabels = true,
     } = db;
     let variantSeries = [];
@@ -184,7 +184,7 @@ function getVariantsSeries(db) {
                 formatter: function ({data: [pos]}) {
                     let output = "";
                     Object.values(sampleVariants).forEach(({POS, REF, ALT}) => {
-                        if (POS === pos) {
+                        if (parseInt(POS) === pos) {
                             output += `${REF}${POS}${ALT}`;
                         }
                     });
@@ -241,7 +241,7 @@ function getRegionAmpliconDepthRenderer(show_amplicons) {
 /**
  * Define options for amplicon depth coverage bars
  * @param {WgsCovPlotDB} db
- * @returns {Array<Object>}
+ * @returns {Object[]}
  */
 function getRegionAmpliconDepthSeries(db) {
     const {
